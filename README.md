@@ -5,6 +5,12 @@
 - Flow 2: Sync Salesforce case comments to Jira tasks
 
 ### Jira Connector Operations
-- Add attachment
-- Add comment
-- Get issue
+- Add Attachment
+- Add Comment
+- Get Issue
+
+### Salesforce Connector Operations
+- Create CaseComment
+- Query Case
+- Query CaseComments
+  
