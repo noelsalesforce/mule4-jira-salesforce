@@ -1,0 +1,15 @@
+{
+  "fields": {
+    "summary": "Main order flow broken",
+    "project": {
+      "id": "10000"
+    },
+    "issuetype": {
+      "id": "10000"
+    },
+    "description": "Order entry fails when selecting supplier.",
+    "assignee": {
+      "id": "5b109f2e9729b51b54dc274d"
+    }
+  }
+}

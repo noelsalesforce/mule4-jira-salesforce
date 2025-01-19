@@ -1,0 +1,267 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:salesforce="http://www.mulesoft.org/schema/mule/salesforce" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:jira="http://www.mulesoft.org/schema/mule/jira" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/jira http://www.mulesoft.org/schema/mule/jira/current/mule-jira.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/salesforce http://www.mulesoft.org/schema/mule/salesforce/current/mule-salesforce.xsd">
+	<configuration-properties doc:name="Configuration properties" doc:id="3857be33-0f32-456f-8674-17479c50dea2" file="credentials.properties" />
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="4e4f5dc2-deaf-46c6-a4d9-38fc70ac05c5" >
+		<http:listener-connection host="0.0.0.0" port="8081" />
+	</http:listener-config>
+	<jira:config name="Jira_Connector_Config" doc:name="Jira Connector Config" doc:id="5241842f-6a59-4ce9-b5a3-ffeb53b3a000" >
+		<jira:basic-auth-connection username="${jira.username}" password="${jira.apiToken}" baseUri="${jira.baseUri}" />
+	</jira:config>
+	<salesforce:sfdc-config name="Salesforce_Config_Manufacturing" doc:name="Salesforce Config" doc:id="62c680b4-1888-42f3-ad77-fac464c545dc" >
+		<salesforce:basic-connection username="${sfdc.usernameManufacturing}" password="${sfdc.passwordManufacturing}" />
+	</salesforce:sfdc-config>
+	<flow name="Flow1-JiratoSalesforce" doc:id="329af500-e543-48aa-95e2-bd44966953ee">
+		<jira:on-updated-issue-trigger doc:name="On new and updated issue trigger" doc:id="da8f9d42-c44d-47c5-bc72-6a61eba8f877" config-ref="Jira_Connector_Config" startDate="2024-12-12">
+			<scheduling-strategy>
+				<fixed-frequency />
+			</scheduling-strategy>
+		</jira:on-updated-issue-trigger>
+		<set-variable value="#[payload.fields.customfield_10054]" doc:name="Salesforce Case ID" doc:id="3c9f62b2-8ed1-4cbf-a742-7e0c2081c944" variableName="salesforceCaseId" />
+		<salesforce:query doc:name="Get Case Comment Count" doc:id="870bb94d-623e-49ad-9de0-d1c2ba0d568f" config-ref="Salesforce_Config_Manufacturing">
+			<salesforce:salesforce-query><![CDATA[SELECT Id FROM CaseComment WHERE ParentId = ':banana']]></salesforce:salesforce-query>
+			<salesforce:parameters ><![CDATA[#[output application/java
+---
+{
+	"banana" : vars.salesforceCaseId
+}]]]></salesforce:parameters>
+		</salesforce:query>
+		<set-variable value="#[sizeOf(payload)]" doc:name="Salesforce Case Comment Count" doc:id="937708b3-3e1f-44f0-a17b-9e8e80226615" variableName="salesforceCaseCommentCount"/>
+		<jira:get-rest-api3-issue-comment-by-issue-id-or-key doc:name="Get Comments" doc:id="73b1a59c-8876-4831-a397-c307c16ac874" config-ref="Jira_Connector_Config" issueIdOrKey="SUP-1"/>
+		<set-variable value="#[sizeOf(payload.comments)]" doc:name="Jira Issue Comment Count" doc:id="b439da15-09db-4097-95e0-a5ef5e682734" variableName="jiraIssueCommentCount"/>
+		<choice doc:name="Choice" doc:id="afb3fb8f-a71c-47eb-a0d0-12cf92057695">
+			<when expression="#[vars.salesforceCaseCommentCount &lt; vars.jiraIssueCommentCount]">
+				<jira:get-rest-api3-issue-comment-by-issue-id-or-key doc:name="Get Comments" doc:id="9810b208-0487-423b-9c9b-343f7673ec92" config-ref="Jira_Connector_Config" issueIdOrKey="SUP-1" startAt="#[vars.salesforceCaseCommentCount]"/>
+				<ee:transform doc:name="Transform Message" doc:id="5d33a48d-8a3b-4f07-9989-8d1320eaf63f">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+[{
+	ParentId: vars.salesforceCaseId,
+	CommentBody: "[Jira Comment]: " ++ (payload.comments.body.content[0].content[0].text)[0],
+}]]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+				<salesforce:create doc:name="Create" doc:id="37b0fa8e-6160-4657-bd30-cf47eceef198" config-ref="Salesforce_Config_Manufacturing" type="CaseComment" />
+			</when>
+			<otherwise>
+				<logger level="INFO" doc:name="Logger" doc:id="eca443dc-1518-483d-be34-e928859824fa" message="NO NEW COMMENTS TO UPDATE!" />
+			</otherwise>
+		</choice>
+		<ee:transform doc:name="Transform Message" doc:id="0958484a-57b3-49b8-a305-0ad21d06fe25">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+	<flow name="Flow2-SalesforcetoJira" doc:id="bcaa573d-d377-42a1-8ece-e9ddd919f415" >
+		<salesforce:modified-object-listener objectType="CaseComment" doc:name="On Modified Object" doc:id="1663a4a0-5ae3-4830-a6e4-821e50470036" config-ref="Salesforce_Config_Manufacturing">
+			<scheduling-strategy >
+				<fixed-frequency />
+			</scheduling-strategy>
+		</salesforce:modified-object-listener>
+		<set-variable value="#[payload.CommentBody]" doc:name="New Comment" doc:id="d8e68063-4309-46ca-b147-f2818d0013fd" variableName="newComment"/>
+		<set-variable value="#[payload.ParentId]" doc:name="Salesforce Case ID" doc:id="87bbb5ae-53bc-4016-8d1f-d63986b1b607" variableName="salesforceCaseId"/>
+		<salesforce:query doc:name="Get Case Comment Count" doc:id="259ed0e9-8040-4925-b1c6-961eee755a2e" config-ref="Salesforce_Config_Manufacturing">
+			<salesforce:salesforce-query><![CDATA[SELECT Id FROM CaseComment WHERE ParentId = ':banana']]></salesforce:salesforce-query>
+			<salesforce:parameters><![CDATA[#[output application/java
+---
+{
+	"banana" : vars.salesforceCaseId
+}]]]></salesforce:parameters>
+		</salesforce:query>
+		<set-variable value="#[sizeOf(payload)]" doc:name="Salesforce Case Comment Count" doc:id="16bec2a2-3a86-442f-b3c3-74df47ce00b1" variableName="salesforceCaseCommentCount" />
+		<salesforce:query doc:name="Get Case's Jira Issue ID" doc:id="a2523278-0c96-4419-bb24-4833a399b4e6" config-ref="Salesforce_Config_Manufacturing">
+			<salesforce:salesforce-query><![CDATA[SELECT Id, Subject, Status, Comments, Jira_Issue_ID__c
+FROM Case
+WHERE Id = ':banana'
+]]></salesforce:salesforce-query>
+			<salesforce:parameters ><![CDATA[#[output application/java
+---
+{
+	"banana" : vars.salesforceCaseId
+}]]]></salesforce:parameters>
+		</salesforce:query>
+		<set-variable value="#[payload[0].Jira_Issue_ID__c]" doc:name="Jira Issue ID" doc:id="4b771871-cf99-4184-b990-66929f768167" variableName="jiraIssueId"/>
+		<jira:get-rest-api3-issue-comment-by-issue-id-or-key doc:name="Get Comments" doc:id="058e7226-d8b8-43f4-8503-aba689fcb20a" config-ref="Jira_Connector_Config" issueIdOrKey="SUP-1" />
+		<set-variable value="#[sizeOf(payload.comments)]" doc:name="Jira Issue Comment Count" doc:id="c78c387f-4754-484d-ad99-d43528582120" variableName="jiraIssueCommentCount" />
+		<choice doc:name="Choice" doc:id="7de5bb5d-0131-4be5-9a2b-25f569557801" >
+			<when expression="#[vars.salesforceCaseCommentCount &gt; vars.jiraIssueCommentCount]">
+				<jira:create-rest-api3-issue-comment-by-issue-id-or-key doc:name="Add Comment" doc:id="ef9e636c-fbb3-4fd2-9fa1-c1bf95d87cdd" config-ref="Jira_Connector_Config" issueIdOrKey="#[vars.jiraIssueId]">
+			<jira:comment-content><![CDATA[#[%dw 2.0
+output application/json
+---
+{
+  "body": {
+    "content": [
+      {
+        "content": [
+          {
+            "text": "[Salesforce Comment]: " ++ vars.newComment as String,
+            "type": "text"
+          }
+        ],
+        "type": "paragraph"
+      }
+    ],
+    "type": "doc",
+    "version": 1
+  }
+}]]]></jira:comment-content>
+		</jira:create-rest-api3-issue-comment-by-issue-id-or-key>
+			</when>
+		</choice>
+		<ee:transform doc:name="Transform Message" doc:id="91e4c8bc-2aa2-476d-bd9d-ab665d447ea3" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+	<flow name="Jira-AddAttachment" doc:id="5c69f955-e7b0-426c-8dd2-1ff7ae1ef93e" >
+		<http:listener doc:name="/addAttachment" doc:id="b95fa018-3e26-437b-a16f-ae4148bbfd57" config-ref="HTTP_Listener_config" path="/addAttachment"/>
+		<jira:create-rest-api3-issue-attachments-by-issue-id-or-key doc:name="Add Attachment" doc:id="80e4d80a-17e9-4ff9-83fa-1f758a78dcbc" config-ref="Jira_Connector_Config" issueIdOrKey="SUP-1" fileName="flow.png"/>
+	</flow>
+	<flow name="Jira-AddComment" doc:id="e2ed7039-fa6c-4818-9cf7-7eb3da2f425d">
+		<http:listener doc:name="/addJiraComment" doc:id="96f6264b-dc52-45ab-b3cb-8203841f5f9d" config-ref="HTTP_Listener_config" path="/addJiraComment" />
+		<jira:create-rest-api3-issue-comment-by-issue-id-or-key doc:name="Add Comment" doc:id="ed48d06d-51b9-4274-bc01-059c98a71883" config-ref="Jira_Connector_Config" issueIdOrKey='SUP-1'>
+			<jira:comment-content><![CDATA[#[%dw 2.0
+output application/json
+---
+{
+  "body": {
+    "content": [
+      {
+        "content": [
+          {
+            "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque eget venenatis elit. Duis eu justo eget augue iaculis fermentum. Sed semper quam laoreet nisi egestas at posuere augue semper.",
+            "type": "text"
+          }
+        ],
+        "type": "paragraph"
+      }
+    ],
+    "type": "doc",
+    "version": 1
+  }
+}]]]></jira:comment-content>
+		</jira:create-rest-api3-issue-comment-by-issue-id-or-key>
+	</flow>
+	<flow name="Jira-GetIssue" doc:id="5dfa0699-bd74-43ad-940d-87eaf97c2c67" >
+		<http:listener doc:name="/getIssue" doc:id="de9bee2b-142c-4b58-b078-80457fba9f0d" config-ref="HTTP_Listener_config" path="/getIssue"/>
+		<jira:get-rest-api3-issue-by-issue-id-or-key doc:name="Get Issue" doc:id="6fb1b16a-4f7c-4be1-b161-bb88eceb7cbd" config-ref="Jira_Connector_Config" issueIdOrKey="SUP-1"/>
+		<ee:transform doc:name="Transform Message" doc:id="8ab3d8c4-1a08-4d5b-9e0e-74c5d2fadee1" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+	<flow name="Jira-GetComments" doc:id="c84f9a63-5af0-407b-ac39-63bffb0a61c5" >
+		<http:listener doc:name="/getComments" doc:id="a040c510-8d5a-4958-b5fe-817b8b600671" config-ref="HTTP_Listener_config" path="/getComments"/>
+		<jira:get-rest-api3-issue-comment-by-issue-id-or-key doc:name="Get Comments" doc:id="1db9c3c4-78a4-42cb-830e-b9d61d069ec2" config-ref="Jira_Connector_Config" issueIdOrKey="SUP-1"/>
+		<ee:transform doc:name="Transform Message" doc:id="f861767b-f8da-4e71-900c-a65ae569524a" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/java
+---
+payload.comments]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<foreach doc:name="For Each" doc:id="c449e848-883d-424b-af1c-67392b6d398e" >
+			<ee:transform doc:name="Transform Message" doc:id="ccf4df71-4660-46da-bb4a-7bca139c3c88" >
+				<ee:message >
+					<ee:set-payload ><![CDATA[%dw 2.0
+output application/java
+---
+[{
+	ParentId: "500Hp00001iurkQIAQ",
+	CommentBody: "Jira Comment: " ++ payload.body.content[0].content[0].text,
+}]
+]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			<salesforce:create type="CaseComment" doc:name="Create" doc:id="580615db-ac6c-49ac-97f3-86414dc35c1a" config-ref="Salesforce_Config_Manufacturing" />
+		</foreach>
+		<ee:transform doc:name="Transform Message" doc:id="46879c2c-770c-457f-8abb-361d6d4cc2db" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+	<flow name="Salesforce-CreateCaseComment" doc:id="ec242ae6-fa05-43e8-a64c-1e420808162d">
+		<http:listener doc:name="/addSalesforceComment" doc:id="464df5fa-4644-41cf-a01f-d396cab0c16f" config-ref="HTTP_Listener_config" path="/addSalesforceComment" />
+		<ee:transform doc:name="Transform Message" doc:id="be35e272-4dbb-4750-984d-81667d788412">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+[{
+	ParentId: payload.caseId,
+	CommentBody: payload.comment,
+}]
+]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<salesforce:create doc:name="Create" doc:id="b58b1731-9be0-488d-b329-96d574058158" config-ref="Salesforce_Config_Manufacturing" type="CaseComment" />
+		<ee:transform doc:name="Transform Message" doc:id="0ca515f2-b6b8-41d0-b1a1-1427668c4d81">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+	<flow name="Salesforce-QueryCase" doc:id="2a6a417f-2f1c-434c-96e0-0e70460887a7" >
+		<http:listener doc:name="/getCase" doc:id="dc95fab1-8ead-4864-9d2d-acbec374c702" config-ref="HTTP_Listener_config" path="/getCase"/>
+		<salesforce:query doc:name="Query" doc:id="d95dba22-12dc-43a2-be9b-3224937283f6" config-ref="Salesforce_Config_Manufacturing">
+			<salesforce:salesforce-query ><![CDATA[SELECT Id, Subject, Status, AccountId, ContactId, Comments
+FROM Case
+WHERE Id = '500Hp00001iurkQIAQ'
+]]></salesforce:salesforce-query>
+		</salesforce:query>
+		<ee:transform doc:name="Transform Message" doc:id="2930cb46-6f3b-45ba-8df9-7debd886736f" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+	<flow name="Salesforce-QueryCaseComments" doc:id="be60efd0-1a76-42cb-aa65-b81ed058744c" >
+		<http:listener doc:name="/getCaseComments" doc:id="2547e26e-0472-4291-a1f2-1fa854950c99" config-ref="HTTP_Listener_config" path="/getCaseComments"/>
+		<salesforce:query doc:name="Query" doc:id="66b7431c-78ec-41d6-a81f-43415726087b" config-ref="Salesforce_Config_Manufacturing">
+			<salesforce:salesforce-query ><![CDATA[SELECT Id, ParentId, CommentBody, CreatedById, CreatedDate, IsPublished
+FROM CaseComment
+WHERE ParentId = '500Hp00001iurkQIAQ'
+]]></salesforce:salesforce-query>
+		</salesforce:query>
+		<ee:transform doc:name="Transform Message" doc:id="8d923b71-dd95-4fb9-8c95-e5b44c01ff46" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+</mule>

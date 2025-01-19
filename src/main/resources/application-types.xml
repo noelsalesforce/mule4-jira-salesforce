@@ -1,0 +1,20 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<types:mule xmlns:types="http://www.mulesoft.org/schema/mule/types">
+  <types:catalog>
+    <types:type name="issueRequest" format="json">
+      <types:shape format="weave" example="examples/jira-issue.json"><![CDATA[%dw 2.0
+
+type issueRequest = {|
+  fields: {|
+    summary: String, 
+    project: {| id: String |}, 
+    issuetype: {| id: String |}, 
+    description: String, 
+    assignee: {| id: String |}
+  |}
+|} {"example": "{\\\"fields\\\":{\\\"summary\\\":\\\"Main order flow broken\\\",\\\"project\\\":{\\\"id\\\":\\\"10000\\\"},\\\"issuetype\\\":{\\\"id\\\":\\\"10000\\\"},\\\"description\\\":\\\"Order entry fails when selecting supplier.\\\",\\\"assignee\\\":{\\\"id\\\":\\\"5b109f2e9729b51b54dc274d\\\"}}}"}
+
+]]></types:shape>
+    </types:type>
+  </types:catalog>
+</types:mule>
